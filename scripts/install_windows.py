@@ -71,7 +71,19 @@ def install(source, target):
     if not sid:
         raise RuntimeError('Cannot determine Windows user SID')
     subprocess.run(['icacls', str(data), '/inheritance:r', '/grant:r', '*'+sid.group(0)+':(OI)(CI)F', '*S-1-5-18:(OI)(CI)F'], check=True, capture_output=True)
+    tray_source = source.with_name('tray_ui.py')
+    requirements = source.parent.parent / 'requirements-windows.txt'
+    if not tray_source.is_file() or not requirements.is_file():
+        raise RuntimeError('Tray source or pinned Windows requirements missing')
+    dependency_env = os.environ.copy()
+    dependency_env['NO_PROXY'] = '*'
+    subprocess.run([sys.executable, '-m', 'pip', 'install', '--disable-pip-version-check',
+                    '--no-warn-script-location', '--only-binary=:all:',
+                    '--index-url', 'https://pypi.org/simple',
+                    '--target', str(app/'vendor'), '-r', str(requirements)],
+                   env=dependency_env, check=True)
     shutil.copy2(source, sender)
+    shutil.copy2(tray_source, app/'tray_ui.py')
     (data/'config.json').write_text(json.dumps(cfg, indent=2), encoding='utf-8')
     backup = data/('codex-config-before-'+datetime.datetime.now().strftime('%Y%m%d-%H%M%S')+'.toml')
     backup.write_bytes(original)
@@ -81,6 +93,20 @@ def install(source, target):
     temp = codex.with_name('config.codex-notify.tmp')
     temp.write_bytes(replacement.encode('utf-8'))
     temp.replace(codex)
+    def ps_quote(value):
+        return "'" + str(value).replace("'", "''") + "'"
+    subprocess.run([sys.executable, '-c',
+                    "import sys;sys.path.insert(0,sys.argv[1]);import tray_ui;tray_ui.icon_image(True).save(sys.argv[2])",
+                    str(app), str(app/'codex-notify.ico')], check=True)
+    shortcut_args = '"' + str(sender) + '" --setup'
+    ps = ("$shellLink = New-Object -ComObject WScript.Shell; "
+          "$link = $shellLink.CreateShortcut(" + ps_quote(target/'CodexNotify.lnk') + "); "
+          "$link.TargetPath = " + ps_quote(pythonw) + "; "
+          "$link.Arguments = " + ps_quote(shortcut_args) + "; "
+          "$link.WorkingDirectory = " + ps_quote(target) + "; "
+          "$link.IconLocation = " + ps_quote(str(app/'codex-notify.ico') + ',0') + "; "
+          "$link.Save()")
+    subprocess.run(['powershell.exe', '-NoProfile', '-Command', ps], check=True)
     (target/'Status.cmd').write_text('@echo off\r\n"'+sys.executable+'" "'+str(sender)+'" --status\r\npause\r\n', encoding='ascii')
     print(json.dumps({'installed': str(target), 'previous_callback_preserved': bool(cfg['previous_notify']), 'config_backup': str(backup)}))
 

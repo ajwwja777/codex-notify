@@ -92,4 +92,31 @@ class SenderTests(unittest.TestCase):
         self.assertNotIn(token.encode(),(n.ROOT/'token.dpapi').read_bytes())
 
 
+    def test_pause_preserves_callback_and_cancels_pending(self):
+        cfg = {'enabled': True, 'previous_notify': ['old.exe', 'turn-ended']}
+        (n.ROOT/'config.json').write_text(json.dumps(cfg), encoding='utf-8')
+        self.add()
+        with mock.patch.object(n, 'start_worker') as worker:
+            n.set_enabled(False)
+            worker.assert_not_called()
+        self.assertFalse(n.config()['enabled'])
+        self.assertEqual(n.config()['previous_notify'], cfg['previous_notify'])
+        self.assertEqual(self.rows()[0]['state'], 'cancelled')
+        self.assertEqual(self.db.execute('SELECT count(*) FROM requests').fetchone()[0], 0)
+        with mock.patch.object(n, 'start_worker') as worker:
+            n.set_enabled(True)
+            worker.assert_called_once()
+        self.assertEqual(self.rows()[0]['state'], 'cancelled')
+
+    def test_paused_events_and_manual_tests_do_not_send_or_queue(self):
+        (n.ROOT/'token.dpapi').write_bytes(b'placeholder')
+        n.set_enabled(False)
+        with mock.patch.object(n, 'previous_callback') as previous, mock.patch.object(n, 'start_worker') as worker:
+            n.bridge(json.dumps(self.event))
+            n.test_notification()
+            previous.assert_called_once()
+            worker.assert_not_called()
+        self.assertEqual(len(self.rows()), 0)
+
+
 if __name__=='__main__': unittest.main()

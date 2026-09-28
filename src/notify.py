@@ -296,61 +296,38 @@ def status_data():
     with contextlib.closing(database()) as db:
         return {'configured': (ROOT/'token.dpapi').exists(),
                           'enabled': config().get('enabled', True),
+                          'requests_today': db.execute('SELECT count(*) FROM requests WHERE day=?', (china_day(time.time()),)).fetchone()[0],
                           'states': {r[0]: r[1] for r in db.execute('SELECT state,count(*) FROM events GROUP BY state')},
                           'recent': [dict(r) for r in db.execute('SELECT project,state,result FROM events ORDER BY created DESC LIMIT 5')]}
 
 
+def set_enabled(enabled):
+    cfg = config()
+    cfg['enabled'] = bool(enabled)
+    ROOT.mkdir(parents=True, exist_ok=True)
+    temporary = ROOT / ('config-' + uuid.uuid4().hex + '.tmp')
+    temporary.write_text(json.dumps(cfg, indent=2), encoding='utf-8')
+    temporary.replace(ROOT / 'config.json')
+    if enabled:
+        start_worker()
+    else:
+        with contextlib.closing(database()) as db:
+            with db:
+                db.execute("UPDATE events SET state='cancelled', result='paused_by_user' WHERE state='pending'")
+    audit('notifications_enabled' if enabled else 'notifications_paused')
+
+
 def test_notification():
+    if not config().get('enabled', True):
+        return False
     with contextlib.closing(database()) as db:
         enqueue({'type': 'agent-turn-complete', 'thread-id': 'self-test', 'turn-id': uuid.uuid4().hex, 'cwd': 'codex-notify-test'}, db)
     start_worker()
 
 
 def setup_window():
-    import tkinter as tk
-    from tkinter import messagebox
-    window = tk.Tk()
-    window.title('CodexNotify — 手机通知')
-    window.geometry('610x340')
-    tk.Label(window, text='粘贴 pushplus 用户令牌或消息令牌（不是 AccessKey）。\n令牌仅在本机加密保存，不进入聊天或 Git。', pady=15).pack()
-    entry = tk.Entry(window, show='*', width=62)
-    entry.pack(padx=20, pady=10)
-    entry.focus_set()
-    def save():
-        try:
-            save_token(entry.get().strip())
-            entry.delete(0, tk.END)
-            test_notification()
-        except ValueError:
-            messagebox.showerror('格式不正确', '请输入令牌本身，不是网页地址。'); return
-        except Exception:
-            messagebox.showerror('未保存', '本地保存失败，请返回对话排查。'); return
-        messagebox.showinfo('已保存', '令牌已在本机加密保存，测试通知已排队。\n请确认手机实际收到通知；排队不代表已送达。')
-        window.destroy()
-    tk.Button(window, text='加密保存并发送测试通知', command=save, padx=12, pady=7).pack(pady=8)
-    def show_status():
-        data = status_data()
-        text = '令牌：' + ('已配置' if data['configured'] else '未配置')
-        text += '\n通知：' + ('启用' if data['enabled'] else '停用')
-        text += '\n\n' + '\n'.join(r['project'] + ': ' + r['state'] + ' / ' + str(r['result']) for r in data['recent'])
-        text += '\n\naccepted 只表示服务端接收，是否送达以手机为准。'
-        messagebox.showinfo('发送状态', text)
-    def test():
-        if not (ROOT/'token.dpapi').exists():
-            messagebox.showinfo('尚未配置', '请先填写令牌。'); return
-        test_notification()
-        messagebox.showinfo('已排队', '测试通知已排队，请查看手机。')
-    def toggle():
-        cfg = config(); cfg['enabled'] = not cfg.get('enabled', True)
-        tmp = ROOT/('config-' + uuid.uuid4().hex + '.tmp')
-        tmp.write_text(json.dumps(cfg, indent=2), encoding='utf-8'); tmp.replace(ROOT/'config.json')
-        if cfg['enabled']: start_worker()
-        show_status()
-    buttons = tk.Frame(window); buttons.pack(pady=8)
-    for label, callback in [('发送测试', test), ('查看状态', show_status), ('启用/停用', toggle)]:
-        tk.Button(buttons, text=label, command=callback, padx=8).pack(side=tk.LEFT, padx=6)
-    tk.Label(window, text='运行文件及数据均位于本应用目录；关闭窗口不影响轮次通知。').pack(pady=10)
-    window.mainloop()
+    import tray_ui
+    tray_ui.run()
 
 
 if __name__ == '__main__':

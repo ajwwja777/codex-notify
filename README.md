@@ -14,7 +14,7 @@ The user approved pushplus App notifications for each completed turn in local Wi
 
 Source, Git and records live on A6000; the lightweight sender runs on Windows. Keep existing Codex callbacks. Send only project name, completion time and a generic completion message. Use deduplication, a rate-limited queue, bounded retries and failure records.
 
-Layout: src/ sender; scripts/ setup and verification; tests/ offline tests. Credentials and runtime state stay outside Git. Acceptance requires one CLI turn and one IDE turn reaching the locked phone with VPN disabled. Foundation only: implementation and acceptance pending.
+Layout: src/ sender; scripts/ setup and verification; tests/ offline tests. Credentials and runtime state stay outside Git. Acceptance requires one CLI turn and one IDE turn reaching the locked phone with VPN disabled. This paragraph records the initial scope; deployment and acceptance results are recorded below.
 
 ## 首版实现与部署（2026-09-28）
 
@@ -23,7 +23,7 @@ Layout: src/ sender; scripts/ setup and verification; tests/ offline tests. Cred
 - 仓库：https://github.com/ajwwja777/codex-notify （public，main）。基础提交 bd7dc3e 已推送并核对远端。
 - 主代码：本目录 src/notify.py；scripts/install_windows.py 为安装工具；scripts/probe.py 为无正文持久化的完成回调验证工具；tests/ 为离线测试。
 - Windows 应用：`D:\Downloads\CodexNotify`。`app/notify.py` 是部署副本；`data/` 保存 DPAPI 加密令牌、受限 ACL 的配置备份、发送队列和日志。`CodexNotify.lnk` 打开设置/测试/状态窗口，`Status.cmd` 显示状态。没有安装 Windows 服务或开机任务。
-- Python 运行依赖：`D:\Downloads\Python\pythonw.exe`（3.10.0）；发送器仅用标准库。安装工具在 Python 3.10 上使用 pip 内置的 TOML 解析器。
+- Python 运行依赖：`D:\Downloads\Python\pythonw.exe`（3.10.0）；后台发送器仅用标准库，托盘界面依赖固定版本 pystray/Pillow/six，部署在 app/vendor。安装工具在 Python 3.10 上使用 pip 内置的 TOML 解析器。
 - Codex 的用户级 `notify` 指向应用脚本，原电脑操作工具的 `turn-ended` 回调存入本地配置并继续调用。安装前完整备份留在应用 data/；已比对除 notify 外的所有 TOML 设置完全一致。
 
 ### 行为与边界
@@ -52,3 +52,16 @@ Layout: src/ sender; scripts/ setup and verification; tests/ offline tests. Cred
 参考：OpenAI Notifications https://learn.chatgpt.com/docs/config-file/config-advanced#notifications ；pushplus App https://www.pushplus.plus/doc/channel/app.html ；额度 https://pushplus.plus/doc/guide/use.html 。
 
 2026-09-28 验收结论：发送器作为 D:\Downloads\CodexNotify 客户端 App 运行，CLI 与插件每轮最终回复结束自动提醒。用户无需常驻打开设置窗口。后续按实际使用反馈维护；升级 Codex 后若通知异常，核查用户级 notify 是否仍指向发送器及原回调路径是否有效。
+
+## 托盘开关更新（2026-09-28）
+
+来源：用户要求应用关闭窗口后留在 Windows 右下角，右键选择开启/关闭推送。已完成并部署。
+
+- 新界面 src/tray_ui.py：窗口关闭时收起到托盘；绿色铃铛表示开启，灰色表示暂停。右键菜单为“打开设置”“开启推送”“暂停推送”“暂停推送并退出”。单击托盘图标或重复打开应用快捷方式会显示已有设置窗口，不重复创建托盘实例。
+- 开关复用本地 enabled 配置，保留原 Codex 回调和令牌。暂停后新轮次不入队、不调用推送 API；暂停时尚未发送的队列置为 cancelled，恢复后不会补发。已经开始的网络请求无法撤回。
+- “暂停推送并退出”保存暂停状态并移除托盘；重新打开应用仍保留上次状态，需要时从菜单开启。普通关闭窗口仅收起，不暂停。没有添加开机启动项或 Windows 服务。
+- 设置窗口显示当前状态、今日本应用请求数、令牌是否配置，提供明确的开启/暂停按钮；保存令牌与发送测试分开，避免保存时额外消耗额度。
+- 应用目录仍为 D:\Downloads\CodexNotify；新文件 app/tray_ui.py、app/codex-notify.ico，GUI 依赖只在 app/vendor，未安装到全局 Python。旧发送器备份留在 data/backups/before-tray/。
+- requirements-windows.txt 固定 pystray 0.19.5、Pillow 12.3.0、six 1.17.0。托盘使用标准库 Tkinter 主循环和 pystray 的 Windows 后端，跨线程菜单动作交给 GUI 队列处理。参考：https://pystray.readthedocs.io/en/latest/usage.html 。
+- 验证：Windows 17 项离线测试全部通过；A6000 13 项通过、4 项平台检查跳过。scripts/smoke_tray_windows.py 在隔离状态目录中实际创建 Windows 托盘，验证关闭收起、菜单暂停/恢复、唤回窗口、单实例和退出暂停；请求计数为 0，不消耗真实推送额度。正式部署副本也通过该验证。
+- 部署保留用户原有 enabled=true 状态，已启动新版窗口及托盘。Windows 可能将图标放在右下角“显示隐藏的图标”区域，可由用户拖到任务栏通知区域。
