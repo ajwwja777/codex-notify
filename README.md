@@ -65,3 +65,5 @@ Layout: src/ sender; scripts/ setup and verification; tests/ offline tests. Cred
 - requirements-windows.txt 固定 pystray 0.19.5、Pillow 12.3.0、six 1.17.0。托盘使用标准库 Tkinter 主循环和 pystray 的 Windows 后端，跨线程菜单动作交给 GUI 队列处理。参考：https://pystray.readthedocs.io/en/latest/usage.html 。
 - 验证：Windows 17 项离线测试全部通过；A6000 13 项通过、4 项平台检查跳过。scripts/smoke_tray_windows.py 在隔离状态目录中实际创建 Windows 托盘，验证关闭收起、菜单暂停/恢复、唤回窗口、单实例和退出暂停；请求计数为 0，不消耗真实推送额度。正式部署副本也通过该验证。
 - 部署保留用户原有 enabled=true 状态，已启动新版窗口及托盘。Windows 可能将图标放在右下角“显示隐藏的图标”区域，可由用户拖到任务栏通知区域。
+
+2026-09-28 安装前旧会话排查：用户反馈本项目旧会话仅回复 OK 时不通知，其他对话可通知。实测本会话为 VS Code 终端内 CLI，进程启动于 19:15，用户级 notify 配置更新于 19:40，进程一直未退出；无命令行 notify/profile 覆写，托盘 enabled=true，发送器中本项目事件数为 0，其他事件均 accepted。证据指向旧进程仍使用启动时配置；建议退出 CLI 后用原会话 ID resume，待用户重启后的实收结果验证。此次没有修改通知代码或更改用户开关。
