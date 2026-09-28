@@ -5,3 +5,10 @@ config.json
 *.sqlite*
 runtime/
 vendor/
+
+# Private deployment records and runtime credentials
+.local/
+data/
+*.dpapi
+*.log
+codex-config-before-*.toml

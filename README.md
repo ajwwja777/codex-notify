@@ -1,69 +1,135 @@
 # codex-notify
 
-目标：命令行或 VS Code 插件中的 Codex 完成任务后，在手机上通知用户。
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-当前阶段：首版部署与自动通知验收完成。用户已确认 App 测试、CLI、插件后端及 VS Code 插件界面新对话的手机实收。
+Windows 上的 Codex CLI 或 VS Code Codex 插件每轮回复结束后，通过 **pushplus App** 通知手机。支持右下角托盘一键开启／暂停，适合离开电脑等待任务完成时使用。
 
-笔记本对话入口：`D:\Code\jiaan_workspace\codex-notify\AGENTS.md`。框架通过笔记本统一入口读取，项目正式记录维护在本目录。
+已在荣耀 Android 手机不开 VPN 的情况下验收。电脑上的 Codex 仍使用原有网络设置；本工具不替代 Codex 自身需要的网络连接。此项目为社区工具，与 OpenAI、pushplus 无隶属关系。
 
-2026-09-28：按用户要求创建笔记本与 A6000 项目目录及引导文档；尚未初始化 Git、创建远端或开发通知功能。下一步由项目对话与用户讨论可行性。
+## 功能
 
-## Implementation approved (2026-09-28)
+- 接收 Codex 的 `agent-turn-complete` 回调；只有一句 OK、没有调用工具的正常结束轮次也能通知。
+- 关闭窗口收起到托盘；绿色表示开启，灰色表示暂停。
+- 暂停不发送新消息，取消尚未发送的队列，恢复后不补发；切换开关不消耗推送额度。已开始的请求无法撤回。
+- 保留并继续调用安装前的 Codex `notify` 命令，包括暂停推送时。
+- 只向 pushplus 发送项目目录名、完成时间、通用提示和短通知编号，不发送提示词或回答正文。
+- 令牌以 Windows DPAPI 加密保存在当前用户的电脑，发送队列持久化并去重。
 
-The user approved pushplus App notifications for each completed turn in local Windows Codex CLI and VS Code. Android receives via domestic push; no phone VPN required.
+## 环境要求
 
-Source, Git and records live on A6000; the lightweight sender runs on Windows. Keep existing Codex callbacks. Send only project name, completion time and a generic completion message. Use deduplication, a rate-limited queue, bounded retries and failure records.
+- Windows 本地运行的 Codex CLI 或 VS Code Codex 插件，已登录并能够正常对话，已有用户级 `config.toml`。
+- 完整版 Python 3.10 或更新版本，包含 pip、Tkinter 和同目录的 `pythonw.exe`。已实测 Python 3.10.0；其他版本需自行验证依赖兼容性。
+- 安装时能直连 PyPI，发送时能直连 `https://www.pushplus.plus`。
+- 手机安装并登录 [pushplus App](https://www.pushplus.plus/doc/channel/app.html)，开启通知权限，按服务当前要求完成账号认证。使用自己的 pushplus 用户令牌。
 
-Layout: src/ sender; scripts/ setup and verification; tests/ offline tests. Credentials and runtime state stay outside Git. Acceptance requires one CLI turn and one IDE turn reaching the locked phone with VPN disabled. This paragraph records the initial scope; deployment and acceptance results are recorded below.
+当前未适配 macOS、Linux、WSL、Remote SSH 中的远端 Codex 或云端任务。不是独立 EXE，安装后不要删除或移动所用的 Python。
 
-## 首版实现与部署（2026-09-28）
+## 安装
 
-来源：本项目对话。用户明确：荣耀 Magic8 Pro、pushplus App 1.4.7、接受实名认证、手机不开 VPN；本地 CLI 和 VS Code 插件每轮最终回复结束均通知。用户认可把笔记本发送器视为客户端 App，并指定放在 D 盘 Downloads。主代码、Git 和正式记录仍归 A6000；笔记本不建立研发仓库。
+下载 [最新版本](https://github.com/ajwwja777/codex-notify/releases/latest) 的 Source code ZIP 并解压，或克隆仓库：
 
-- 仓库：https://github.com/ajwwja777/codex-notify （public，main）。基础提交 bd7dc3e 已推送并核对远端。
-- 主代码：本目录 src/notify.py；scripts/install_windows.py 为安装工具；scripts/probe.py 为无正文持久化的完成回调验证工具；tests/ 为离线测试。
-- Windows 应用：`D:\Downloads\CodexNotify`。`app/notify.py` 是部署副本；`data/` 保存 DPAPI 加密令牌、受限 ACL 的配置备份、发送队列和日志。`CodexNotify.lnk` 打开设置/测试/状态窗口，`Status.cmd` 显示状态。没有安装 Windows 服务或开机任务。
-- Python 运行依赖：`D:\Downloads\Python\pythonw.exe`（3.10.0）；后台发送器仅用标准库，托盘界面依赖固定版本 pystray/Pillow/six，部署在 app/vendor。安装工具在 Python 3.10 上使用 pip 内置的 TOML 解析器。
-- Codex 的用户级 `notify` 指向应用脚本，原电脑操作工具的 `turn-ended` 回调存入本地配置并继续调用。安装前完整备份留在应用 data/；已比对除 notify 外的所有 TOML 设置完全一致。
+```powershell
+git clone https://github.com/ajwwja777/codex-notify.git
+cd codex-notify
+```
 
-### 行为与边界
+在源码根目录的 PowerShell 中执行（`py` 不可用时换成自己的 `python.exe` 完整路径）：
 
-接收官方 agent-turn-complete 事件，只为拥有 thread-id 和 turn-id 的轮次入队。按这两个 ID 去重，队列只保存哈希 ID、项目目录名、时间和发送状态；不存提示词、完整回复和完整项目路径。原回调收到原始参数。
+```powershell
+py -3 scripts/install_windows.py --source src/notify.py --target D:\Downloads\CodexNotify
+```
 
-每次回调快速启动独立隐藏发送进程；文件锁使同一时刻只有一个队列消费者。队列清空即退出。应用关闭窗口不影响通知；笔记本关机/睡眠期间无法发送，进程被终止后由下一次完成事件或应用测试按钮唤起队列。过期一小时的消息不再发送；元数据最长保留 30 天。
+`--target` 可替换为自己有写入权限的目录，没有 D 盘也可以安装。当前安装器生成的 `Status.cmd` 使用 ASCII，请使用不含中文等非 ASCII 字符的 Python 路径和安装路径。一般不需要管理员权限。
 
-通过 HTTPS POST 到 pushplus 的 App 渠道，仅此 HTTP 客户端禁用系统/环境代理，不更改系统 VPN 或 Codex 网络配置。进程级代理或 VPN 的系统隧道路由仍由用户现有网络软件控制。
+安装器会：
 
-请求间隔至少 13 秒；本应用北京时间每天最多 190 次请求，重试计数，给服务方 200 次额度留余量。该预算不涵盖账号在其他程序中的请求。明确临时服务错误最多尝试 3 次；网络结果不确定时不自动重发，避免重复。受服务端或手机系统限制，无法保证每条通知都即时送达。
+1. 复制运行文件到目标目录的 `app/`，将固定版本的界面依赖安装到 `app/vendor/`，不安装到全局 Python。
+2. 在 `data/` 备份现有 Codex 配置，保存原 `notify`，并替换用户级 `notify`；保持其他 TOML 设置不变。
+3. 创建 `CodexNotify.lnk` 和 `Status.cmd`，将 `data/` 权限限制为当前用户和 SYSTEM。
 
-通知仅包含“本轮回复已结束”、项目名、时间和短通知编号。accepted 表示 pushplus 已接收请求，不等于手机送达；uncertain 表示结果不确定；limited、expired、failed 均可在应用状态中查看。第一版只通知轮次正常回复结束，不将中间进度、审批等待、崩溃或中断当作成功完成。
+配置路径遵循 `CODEX_HOME`，未设置时为 `%USERPROFILE%\.codex\config.toml`。安装前退出其他正在修改该配置的程序。当前安装器遇到多行 `notify` 数组会拒绝自动修改，先将该数组整理为等价的单行形式后再安装。
 
-### 已完成验证与验收
+## 配置手机通知
 
-- Windows 15 项测试通过，覆盖去重、敏感正文不持久化、限速、每日预算、有限重试、不确定结果不重发、超时丢弃、原回调参数保留、进程锁、DPAPI 加密和配置合并。
-- A6000 的 Python 3.8：11 项通过，4 项 Windows/安装环境专用检查跳过。
-- 实际 Codex CLI 0.158.0 完成一次仅回复 OK 的轮次，产生 notify 回调。
-- 插件 26.917.62051 自带后端 0.155.0-alpha.16.3 通过 App Server 完成一次仅回复 OK 的轮次，产生同类 notify 回调。这是后端验证，不等同于插件界面最终验收。
-- 笔记本直连 pushplus HTTPS 首页返回 200；尚不能替代推送送达测试。
-- 2026-09-28 后续：用户已在本地窗口配置令牌，并明确确认手机收到 App 测试通知。安装后的 CLI 与插件 App Server 后端分别通过正式用户级 notify 完成一次 OK 轮次，对应 codex-notify-cli-check、codex-notify-ide-backend-check 两条请求均获 pushplus accepted；本次未覆写回调配置。
-- 用户随后明确确认 codex-notify-cli-check 和 codex-notify-ide-backend-check 两条自动通知均已实收。
-- 最终验收反馈：在要求手机关闭 VPN、锁屏并使用 VS Code 插件新对话发送“只回复 OK，不调用工具”的验收步骤后，用户明确确认该轮也能自动通知。插件界面实收已确认；首版验收闭环。手机状态以用户操作为准，未通过工具独立观测。
+1. 打开安装目录中的 **CodexNotify.lnk**。
+2. 将自己的 pushplus 用户令牌粘贴到设置窗口，点击“保存令牌”。不要把令牌发到 Issues、聊天或提交进 Git。
+3. 确认状态为开启，点击“发送测试通知”，检查手机是否实际收到。测试会计入请求额度，保存令牌不会。
+4. **退出并重新启动安装前已打开的 Codex CLI；VS Code 插件请重启 VS Code。** 已经运行的进程可能仍使用旧的 `notify` 配置。
+5. 在 CLI 和插件中分别发送“只回复 OK，不调用工具”，检查手机通知。
 
-参考：OpenAI Notifications https://learn.chatgpt.com/docs/config-file/config-advanced#notifications ；pushplus App https://www.pushplus.plus/doc/channel/app.html ；额度 https://pushplus.plus/doc/guide/use.html 。
+CLI 可以用 `codex resume <会话ID>` 恢复原会话。项目实测中，安装前启动的旧 CLI 没有通知，退出并恢复原会话后成功。
 
-2026-09-28 验收结论：发送器作为 D:\Downloads\CodexNotify 客户端 App 运行，CLI 与插件每轮最终回复结束自动提醒。用户无需常驻打开设置窗口。后续按实际使用反馈维护；升级 Codex 后若通知异常，核查用户级 notify 是否仍指向发送器及原回调路径是否有效。
+通知示例：
 
-## 托盘开关更新（2026-09-28）
+```text
+Codex | my-project
+本轮回复已结束，请返回电脑查看。
+项目：my-project
+时间：2026-09-28T20:00:00+08:00
+通知编号：0123456789
+```
 
-来源：用户要求应用关闭窗口后留在 Windows 右下角，右键选择开启/关闭推送。已完成并部署。
+## 日常开关
 
-- 新界面 src/tray_ui.py：窗口关闭时收起到托盘；绿色铃铛表示开启，灰色表示暂停。右键菜单为“打开设置”“开启推送”“暂停推送”“暂停推送并退出”。单击托盘图标或重复打开应用快捷方式会显示已有设置窗口，不重复创建托盘实例。
-- 开关复用本地 enabled 配置，保留原 Codex 回调和令牌。暂停后新轮次不入队、不调用推送 API；暂停时尚未发送的队列置为 cancelled，恢复后不会补发。已经开始的网络请求无法撤回。
-- “暂停推送并退出”保存暂停状态并移除托盘；重新打开应用仍保留上次状态，需要时从菜单开启。普通关闭窗口仅收起，不暂停。没有添加开机启动项或 Windows 服务。
-- 设置窗口显示当前状态、今日本应用请求数、令牌是否配置，提供明确的开启/暂停按钮；保存令牌与发送测试分开，避免保存时额外消耗额度。
-- 应用目录仍为 D:\Downloads\CodexNotify；新文件 app/tray_ui.py、app/codex-notify.ico，GUI 依赖只在 app/vendor，未安装到全局 Python。旧发送器备份留在 data/backups/before-tray/。
-- requirements-windows.txt 固定 pystray 0.19.5、Pillow 12.3.0、six 1.17.0。托盘使用标准库 Tkinter 主循环和 pystray 的 Windows 后端，跨线程菜单动作交给 GUI 队列处理。参考：https://pystray.readthedocs.io/en/latest/usage.html 。
-- 验证：Windows 17 项离线测试全部通过；A6000 13 项通过、4 项平台检查跳过。scripts/smoke_tray_windows.py 在隔离状态目录中实际创建 Windows 托盘，验证关闭收起、菜单暂停/恢复、唤回窗口、单实例和退出暂停；请求计数为 0，不消耗真实推送额度。正式部署副本也通过该验证。
-- 部署保留用户原有 enabled=true 状态，已启动新版窗口及托盘。Windows 可能将图标放在右下角“显示隐藏的图标”区域，可由用户拖到任务栏通知区域。
+| 操作 | 效果 |
+| --- | --- |
+| 点击窗口关闭按钮 | 收起到托盘，继续按当前状态工作 |
+| 托盘右键 → 暂停推送 | 暂停发送，取消待发送消息 |
+| 托盘右键 → 开启推送 | 恢复后续轮次通知 |
+| 托盘右键 → 打开设置 | 显示设置窗口 |
+| 托盘右键 → 暂停推送并退出 | 保存暂停状态并退出界面 |
 
-2026-09-28 安装前旧会话排查：用户反馈本项目旧会话仅回复 OK 时不通知，其他对话可通知。实测本会话为 VS Code 终端内 CLI，进程启动于 19:15，用户级 notify 配置更新于 19:40，进程一直未退出；无命令行 notify/profile 覆写，托盘 enabled=true，发送器中本项目事件数为 0，其他事件均 accepted。证据指向旧进程仍使用启动时配置；建议退出 CLI 后用原会话 ID resume，待用户重启后的实收结果验证。此次没有修改通知代码或更改用户开关。
+托盘图标可能位于 Windows 右下角的隐藏图标区域。重新打开快捷方式会唤回已有窗口。退出后重新打开仍保留暂停状态，需要手动开启。
+
+不安装 Windows 服务或开机启动项。发送器由完成事件触发，队列清空后退出；托盘界面不必常驻才能发送。电脑关机或睡眠时无法发送。
+
+## 配额、隐私和限制
+
+- 本工具固定每次请求间隔至少 13 秒，北京时间每天最多 190 次请求，包含测试与重试；不是服务方对账号额度的承诺。账号通过其他程序发送的请求不计入本地预算。实际额度以 [pushplus 当前规则](https://www.pushplus.plus/doc/guide/use.html) 为准。
+- 消息等待超过一小时会过期，队列元数据最多保留 30 天。明确的临时错误最多尝试三次；网络结果不确定时不自动重发，避免重复。
+- `accepted` 仅表示 pushplus 接收了请求，不表示手机已经送达。手机系统权限、网络和服务方限流可能影响送达。
+- 仅通知正常完成的轮次，不通知中间进度、等待审批、崩溃或中断，也不判断任务结果是否正确。
+- 本工具不持久化提示词和回答正文。原有回调仍接收 Codex 原始参数，其数据处理由原回调负责。
+- 项目目录名会发送给 pushplus；它也可能含有敏感信息，请根据自己的项目命名判断是否适用。
+- `data/` 含加密令牌、配置备份、队列和日志，不要公开。配置备份可能含其他应用原本写入的秘密；DPAPI 也不防御已控制当前 Windows 账户的程序。
+- 只有 pushplus HTTP 客户端绕过系统／环境 HTTP 代理，不改变系统 VPN 设置，不能绕过 VPN 的系统路由。
+
+## 排查与维护
+
+**测试通知能收到，某个旧会话收不到：** 先退出该 CLI，再用 `codex resume` 恢复。插件重启 VS Code。若仍失败，检查该会话是否使用另一份 `CODEX_HOME`、命令行覆盖或不同机器上的后端。
+
+**所有通知都收不到：** 确认托盘开启、令牌已配置，使用“查看发送状态”或 `Status.cmd` 查看状态。检查手机登录账户和通知权限。`limited` 表示本地额度用尽，`expired` 表示过期，`uncertain` 表示网络结果不确定；不要仅凭 `accepted` 判定送达。
+
+**安装失败：** 先确认 Codex 用户配置存在，Python 能运行 `-m pip --version` 和 `-m tkinter`，并能直连 PyPI。安装器不会下载 Python。安装中断后检查终端错误，修复原因再重跑；如已替换回调，配置备份在 `data/codex-config-before-*.toml`。
+
+**更新：** 先从托盘选择“暂停推送并退出”，取得新版源码，使用相同 Python 和相同目标目录重跑安装命令。保留原有令牌及开关状态；重新打开后按需开启。不要直接搬动已安装目录，否则 Codex 中的绝对路径会失效。
+
+**卸载：** 先暂停并退出，将 Codex 用户配置中的顶层 `notify` 恢复为 `data/config.json` 里的 `previous_notify`；原来没有回调时删除该项。重启 Codex／VS Code 后再删除安装目录。不要直接用旧的整份配置覆盖当前配置，以免丢失安装后修改的其他设置。
+
+提交 [Issue](https://github.com/ajwwja777/codex-notify/issues) 时提供 Windows、Python、Codex／插件版本、复现步骤和去除敏感信息的状态结果，不要上传令牌、完整配置备份或对话正文。
+
+## 源码和验证
+
+```text
+src/notify.py                 完成回调、队列和发送器
+src/tray_ui.py                Windows 托盘与设置窗口
+scripts/install_windows.py   安装工具
+scripts/probe.py             回调验证工具
+scripts/smoke_tray_windows.py 隔离的 Windows 托盘验证
+tests/                       离线测试
+requirements-windows.txt     固定版本的界面依赖
+```
+
+源码目录运行离线测试，不发送真实推送：
+
+```powershell
+py -3 -m unittest discover -s tests -v
+```
+
+2026-09-28 验证记录：Windows Python 3.10.0 的 17 项测试通过，隔离托盘交互验证通过；A6000 Python 3.8 的 13 项通过、4 项平台／依赖相关检查跳过。Codex CLI 0.158.0、VS Code 扩展 26.917.62051（后端 0.155.0-alpha.16.3）、pushplus App 1.4.7 与荣耀 Magic8 Pro 完成实收验收。用户随后确认旧 CLI 重启并恢复后也收到通知。其他版本和机型尚未逐一验证。
+
+2026-09-28：按用户要求整理公开使用文档、采用 MIT 许可证，v0.1.0 提供源码、安装脚本和固定依赖清单。本次不改变已部署发送器。Codex 升级后若出现异常，应重新验证完成回调与原回调路径。
+
+## 许可证
+
+[MIT](LICENSE)，Copyright (c) 2026 ajwwja777。第三方依赖适用各自的许可证。
