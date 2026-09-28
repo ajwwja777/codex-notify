@@ -2,7 +2,7 @@
 
 目标：命令行或 VS Code 插件中的 Codex 完成任务后，在手机上通知用户。
 
-当前阶段：用户已确认方案并授权实施；Windows 应用已部署，等待令牌配置与手机送达验收。
+当前阶段：Windows 应用已部署，令牌已在本地加密保存；用户已确认 App 测试通知实收，CLI/插件后端自动通知已发送，待插件界面锁屏验收。
 
 笔记本对话入口：`D:\Code\jiaan_workspace\codex-notify\AGENTS.md`。框架通过笔记本统一入口读取，项目正式记录维护在本目录。
 
@@ -45,6 +45,7 @@ Layout: src/ sender; scripts/ setup and verification; tests/ offline tests. Cred
 - 实际 Codex CLI 0.158.0 完成一次仅回复 OK 的轮次，产生 notify 回调。
 - 插件 26.917.62051 自带后端 0.155.0-alpha.16.3 通过 App Server 完成一次仅回复 OK 的轮次，产生同类 notify 回调。这是后端验证，不等同于插件界面最终验收。
 - 笔记本直连 pushplus HTTPS 首页返回 200；尚不能替代推送送达测试。
-- 待完成：用户在本地应用窗口保存令牌；App 测试通知实收；使用安装后的 CLI 与插件界面分别完成一轮，确认手机关闭 VPN、锁屏时各收到一条。已有 CLI/插件进程可能要重新打开才能加载新的用户级配置。
+- 2026-09-28 后续：用户已在本地窗口配置令牌，并明确确认手机收到 App 测试通知。安装后的 CLI 与插件 App Server 后端分别通过正式用户级 notify 完成一次 OK 轮次，对应 codex-notify-cli-check、codex-notify-ide-backend-check 两条请求均获 pushplus accepted；本次未覆写回调配置。
+- 待完成：用户确认上述两条自动通知实收，以及手机关闭 VPN、锁屏时的插件界面实收验收。已有 CLI/插件进程可能要重新打开才能加载新的用户级配置。
 
 参考：OpenAI Notifications https://learn.chatgpt.com/docs/config-file/config-advanced#notifications ；pushplus App https://www.pushplus.plus/doc/channel/app.html ；额度 https://pushplus.plus/doc/guide/use.html 。
